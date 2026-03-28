@@ -1,56 +1,103 @@
-#NOMBRE DEL CÓDIGO: MÉTODO_BS
-#MÉTODO BLACK_SCHOLES CON PRUEBA DE PARIDAD PUT-CALL
-
+import matplotlib.pyplot as plt
 import numpy as np
-from numpy import*
 from scipy.stats import norm
-from math import exp,log
 
-#Solicitamos al usuario los datos
-tipo = input('Tipo de opción: call(compra) o Put(venta).Ingrese call o put . ')
-spot = float(input('Precio Spot (S_0):'))
-strik = float(input('Precio de ejercicio (k,Strik):'))
-meses = float(input('Duración en meses:'))
-r = float(input('Tasa Libre de Riesgo: '))
-print('TLR =', r * 100, '%')
-sigma = float(input('Volatilidad anual, sigma: '))
-print('Volatilidad =', sigma * 100, '%')
+S0 = float(input("Precio Spot (S_0): "))
+K = float(input("Precio de ejercicio(K): "))
+T = float(input("Tiempo de duración (T) en meses: "))
+r = float(input("Tasa Libre de Riesgo (r): "))
+tipo = input("Tipo de opción call o put. Ingrese call o put: ").lower()
+ops = input("Tipo de opción americana o europea. Ingrese americana o europea: ").lower()
+N = int(input("Número de pasos en el modelo binomial: "))
+vol = input("¿Tiene el valor de la volatilidad? . Indique si o no: ").lower()
 
-T = meses / 12
-#Definimos la función para BS
-def blackScholes(r, spot, strik, T, sigma):
+T1 = T / 12
+dt = T1 / N
 
-    d1 = (np.log(spot / strik) + (r + sigma ** 2 / 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
+# PARÁMETROS
 
-    option1 = spot * norm.cdf(d1, 0, 1) - strik * np.exp(-r * T) * norm.cdf(d2, 0, 1)
-    option2 = strik * np.exp(-r * T) * norm.cdf(-d2, 0, 1) - spot * norm.cdf(-d1, 0, 1)
+if vol == 'si':
+    sigma = float(input("Volatilidad del activo (sigma): "))
+    u = np.exp(sigma * np.sqrt(dt))
+    d = 1 / u
+else:
+    u = float(input("Valor de u: "))
+    d = float(input("Valor de d: "))
+    sigma = np.log(u) / np.sqrt(dt)
+    print("Valor de sigma calculado:", sigma)
 
-    if tipo == "call":
-        print("Valor del CALL europeo por Black-Scholes", option1)
-        return option1
-    else:
-        print("Valor del PUT europeo por Black-Scholes", option2)
-        return option2
+p = (np.exp(r * dt) - d) / (u - d)
+q = 1 - p
+disc = np.exp(-r * dt)
 
-# Llamamos a la función blackScholes para obtener los precios de call o put
-precio_opcion = blackScholes(r,spot,strik,T,sigma)
+# Validación básica
+if not (0 <= p <= 1):
+    raise ValueError("Probabilidad p fuera de rango (revisar parámetros)")
 
-# Verificación de la paridad PUT-CALL
-def paridad_p_c(tipo, precio_opcion, spot, strik, r, T):
-    if tipo == 'call':
-        precio2 = precio_opcion + strik * np.exp(-r * T) - spot
-        a= precio_opcion + strik * np.exp(-r * T)
-        b= precio2+ spot
-        print(f"Igualdad de la paridad Put-Call: {precio_opcion} + {strik * np.exp(-r * T)} = {precio2} + {spot}")
-        print("Se cumple:",a,"=",b)
-    elif tipo == 'put':
-        # Calcula el valor del CALL utilizando la paridad Put-Call
-        precio1 = precio_opcion - strik * np.exp(-r * T) + spot
-        f= precio1 + strik * np.exp(-r * T)
-        g= precio_opcion + spot
-        print(f"Igualdad de la paridad Put-Call: {precio1} + {strik * np.exp(-r * T)} = {precio_opcion} + {spot}")
-        print("Se cumple:",f,"=",g)
+print("Valor de u:", u)
+print("Valor de d:", d)
+print("Valor de p:", p)
+print("Valor de q:", q)
 
-# Llamamos a la función para verificar la paridad Put-Call
-paridad_p_c(tipo, precio_opcion, spot, strik, r, T)
+
+# FUNCIÓN EUROPEA
+
+def europea_b(K, T1, S0, r, N, tipo):
+
+    S = np.zeros((N + 1, N + 1))
+    C = np.zeros((N + 1, N + 1))
+
+    # Precios al vencimiento
+    for j in range(N + 1):
+        S[N, j] = S0 * u**j * d**(N - j)
+
+        if tipo == 'put':
+            C[N, j] = max(0, K - S[N, j])
+        else:
+            C[N, j] = max(0, S[N, j] - K)
+
+    # Backward
+    for i in range(N - 1, -1, -1):
+        for j in range(i + 1):
+            S[i, j] = S0 * u**j * d**(i - j)
+            C[i, j] = disc * (p * C[i + 1, j + 1] + q * C[i + 1, j])
+
+    return C[0, 0], S, C
+
+
+# FUNCIÓN AMERICANA
+
+def americana_b(K, T1, S0, r, N, tipo):
+
+    S = np.zeros((N + 1, N + 1))
+    C = np.zeros((N + 1, N + 1))
+
+    for j in range(N + 1):
+        S[N, j] = S0 * u**j * d**(N - j)
+
+        if tipo == 'put':
+            C[N, j] = max(0, K - S[N, j])
+        else:
+            C[N, j] = max(0, S[N, j] - K)
+
+    for i in range(N - 1, -1, -1):
+        for j in range(i + 1):
+            S[i, j] = S0 * u**j * d**(i - j)
+            valor_esperado = disc * (p * C[i + 1, j + 1] + q * C[i + 1, j])
+
+            if tipo == 'put':
+                C[i, j] = max(valor_esperado, K - S[i, j])
+            else:
+                C[i, j] = max(valor_esperado, S[i, j] - K)
+
+    return C[0, 0], S, C
+
+
+# EJECUCIÓN
+
+if ops == "europea":
+    precio, S, C = europea_b(K, T1, S0, r, N, tipo)
+else:
+    precio, S, C = americana_b(K, T1, S0, r, N, tipo)
+
+print("\nPrecio de la opción:", precio)
